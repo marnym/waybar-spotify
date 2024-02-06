@@ -8,7 +8,7 @@ import (
 )
 
 type State struct {
-	Playing  bool   `json:"playing"`
+	Playing  string `json:"class"`
 	Metadata string `json:"text"`
 }
 
@@ -31,7 +31,7 @@ func main() {
 
 	go func() {
 		state := State{
-			Playing:  false,
+			Playing:  "",
 			Metadata: "",
 		}
 		e := json.NewEncoder(os.Stdout)
@@ -39,7 +39,11 @@ func main() {
 		for {
 			select {
 			case status := <-statuses:
-				state.Playing = status == "Playing"
+				if status == "Playing" {
+					state.Playing = "playing"
+				} else {
+					state.Playing = ""
+				}
 			case metadata := <-metadatas:
 				state.Metadata = metadata
 			}
