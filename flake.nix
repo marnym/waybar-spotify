@@ -3,32 +3,39 @@
 
   outputs = { self, nixpkgs }:
     let
-      goVersion = 21;
-      overlays = [ (final: prev: { go = prev."go_1_${toString goVersion}"; }) ];
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-      forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
-        pkgs = import nixpkgs { inherit overlays system; };
+      forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f rec {
+        pkgs = import nixpkgs { inherit system; };
+        rustToolchain = pkgs.rustPlatform;
       });
     in
     {
-      devShells = forEachSupportedSystem ({ pkgs }: {
+      devShells = forEachSupportedSystem ({ pkgs, rustToolchain }: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-            go
-            gotools
-            golangci-lint
+            (with rustToolchain; [
+              cargo
+              rustc
+              rustLibSrc
+              rust-analyzer
+            ])
+
+            clippy
+            rustfmt
+            pkg-config
           ];
+
+          RUST_SRC_PATH = "${rustToolchain.rustLibSrc}";
         };
       });
 
-      packages = forEachSupportedSystem
-        ({ pkgs }: {
-          default = pkgs.buildGoModule {
-            pname = "waybar-spotify";
-            version = "1.0.0";
-            src = ./.;
-            vendorHash = null;
-          };
-        });
+      packages = forEachSupportedSystem ({ pkgs, rustToolchain }: {
+        default = rustToolchain.buildRustPackage {
+          pname = "waybar-spotify";
+          version = "1.0.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+        };
+      });
     };
 }
