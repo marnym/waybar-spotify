@@ -14,5 +14,16 @@
           packages = with pkgs; [ zig zls ];
         };
       });
+      packages = forEachSupportedSystem ({ pkgs }: rec {
+        default = pkgs.stdenvNoCC.mkDerivation
+          {
+            pname = "waybar-spotify";
+            version = "0.1.0";
+            src = ./.;
+
+            nativeBuildInputs = with pkgs; [ zig.hook ];
+          };
+        waybar-spotify = default;
+      });
     };
 }

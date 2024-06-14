@@ -29,6 +29,14 @@ pub const Listener = enum {
     }
 };
 
+fn remove_newlines(str: []u8) void {
+    for (str, 0..) |c, i| {
+        if (c == '\n' or c == '\r') {
+            str.ptr[i] = 0;
+        }
+    }
+}
+
 pub const State = struct {
     /// either `playing` or an empty string
     playing: []const u8,
@@ -49,14 +57,6 @@ pub const State = struct {
 };
 
 const base_args = [_][]const u8{ "playerctl", "--player", "spotify", "--follow" };
-
-fn remove_newlines(str: []u8) void {
-    for (str, 0..) |c, i| {
-        if (c == '\n' or c == '\r') {
-            str.ptr[i] = 0;
-        }
-    }
-}
 
 pub fn createProcess(comptime args: []const []const u8, allocator: std.mem.Allocator) ChildProcess {
     var process = ChildProcess.init(base_args ++ args, allocator);
