@@ -15,41 +15,21 @@ pub const Listener = enum {
             },
         };
     }
-
-    pub fn handleMessage(self: Listener, msg: []u8) []const u8 {
-        remove_newlines(msg);
-
-        return switch (self) {
-            .Status => {
-                const playing = std.mem.eql(u8, "Playing", msg);
-                return if (playing) "playing" else "";
-            },
-            .Metadata => msg,
-        };
-    }
 };
-
-fn remove_newlines(str: []u8) void {
-    for (str, 0..) |c, i| {
-        if (c == '\n' or c == '\r') {
-            str.ptr[i] = 0;
-        }
-    }
-}
 
 pub const State = struct {
     /// either `playing` or an empty string
-    playing: []const u8,
+    playing: bool,
     /// contains information of current track in the form of `Artist - Song`
     metadata: []const u8,
 
     writer: std.io.AnyWriter,
     mutex: std.Thread.Mutex,
 
-    pub fn jsonStringify(value: @This(), jws: anytype) !void {
+    pub fn jsonStringify(value: State, jws: anytype) !void {
         try jws.beginObject();
         try jws.objectField("class");
-        try jws.write(value.playing);
+        try jws.write(if (value.playing) "playing" else "");
         try jws.objectField("text");
         try jws.write(value.metadata);
         try jws.endObject();
@@ -60,9 +40,9 @@ const base_args = [_][]const u8{ "playerctl", "--player", "spotify", "--follow" 
 
 pub fn createProcess(comptime args: []const []const u8, allocator: std.mem.Allocator) ChildProcess {
     var process = ChildProcess.init(base_args ++ args, allocator);
+    process.stdout_behavior = .Pipe;
     process.stderr_behavior = .Ignore;
     process.stdin_behavior = .Ignore;
-    process.stdout_behavior = .Pipe;
     return process;
 }
 
@@ -73,24 +53,30 @@ pub fn listenToProcess(comptime listener: Listener, state: *State) !void {
 
     const args = comptime listener.args();
     var process = createProcess(args, allocator);
-    try process.spawn();
+    process.spawn() catch |err| {
+        std.debug.print("failed to spawn {s}: {}\n", .{ process.argv, err });
+        return;
+    };
 
-    var msg_buf: [1024]u8 = undefined;
+    var msg_buf: [256]u8 = undefined;
     const reader = process.stdout.?.reader();
     while (try reader.readUntilDelimiterOrEof(&msg_buf, '\n')) |msg| {
-        const out = listener.handleMessage(msg);
+        const trimmed = std.mem.trimRight(u8, msg, "\n");
 
         state.mutex.lock();
         defer state.mutex.unlock();
         switch (listener) {
-            .Status => state.playing = out,
-            .Metadata => state.metadata = out,
+            .Metadata => state.metadata = trimmed,
+            .Status => state.playing = std.mem.eql(u8, "Playing", msg),
         }
         try std.json.stringify(state, .{}, state.writer);
         try state.writer.writeByte('\n');
     }
 
-    _ = try process.kill();
+    _ = process.kill() catch |err| {
+        std.debug.print("failed to kill {s}: {}\n", .{ process.argv, err });
+        return;
+    };
 }
 
 pub fn main() !void {
