@@ -82,9 +82,11 @@ pub fn listenToProcess(comptime listener: Listener, state: *State) !void {
 pub fn main() !void {
     var state = State{ .playing = undefined, .metadata = "", .writer = std.io.getStdOut().writer().any(), .mutex = std.Thread.Mutex{} };
 
-    const status_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Status, &state });
-    const metadata_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Metadata, &state });
+    {
+        const status_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Status, &state });
+        defer status_thread.join();
 
-    status_thread.join();
-    metadata_thread.join();
+        const metadata_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Metadata, &state });
+        defer metadata_thread.join();
+    }
 }
