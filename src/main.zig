@@ -46,11 +46,7 @@ pub fn createProcess(comptime args: []const []const u8, allocator: std.mem.Alloc
     return process;
 }
 
-pub fn listenToProcess(comptime listener: Listener, state: *State) !void {
-    var buf: [256]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
+pub fn listenToProcess(comptime listener: Listener, state: *State, allocator: std.mem.Allocator) !void {
     const args = comptime listener.args();
     var process = createProcess(args, allocator);
     process.spawn() catch |err| {
@@ -82,11 +78,14 @@ pub fn listenToProcess(comptime listener: Listener, state: *State) !void {
 pub fn main() !void {
     var state = State{ .playing = undefined, .metadata = "", .writer = std.io.getStdOut().writer().any(), .mutex = std.Thread.Mutex{} };
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
     {
-        const status_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Status, &state });
+        const status_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Status, &state, allocator });
         defer status_thread.join();
 
-        const metadata_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Metadata, &state });
+        const metadata_thread = try std.Thread.spawn(.{}, listenToProcess, .{ Listener.Metadata, &state, allocator });
         defer metadata_thread.join();
     }
 }
