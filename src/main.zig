@@ -23,7 +23,7 @@ pub const State = struct {
     /// contains information of current track in the form of `Artist - Song`
     metadata: []const u8,
 
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     mutex: std.Thread.Mutex,
 
     pub fn jsonStringify(value: State, jws: anytype) !void {
@@ -50,13 +50,20 @@ pub fn listenToProcess(comptime listener: Listener, state: *State, allocator: st
     const args = comptime listener.args();
     var process = createProcess(args, allocator);
     process.spawn() catch |err| {
-        std.debug.print("failed to spawn {s}: {}\n", .{ process.argv, err });
+        const joined_args = std.mem.join(allocator, " ", process.argv) catch "ALLOCATION_FAILED";
+        std.debug.print("failed to spawn {s}: {}\n", .{ joined_args, err });
         return;
     };
+    defer {
+        _ = process.kill() catch |err| {
+            const joined_args = std.mem.join(allocator, " ", process.argv) catch "ALLOCATION_FAILED";
+            std.debug.print("failed to kill {s}: {}\n", .{ joined_args, err });
+        };
+    }
 
     var msg_buf: [256]u8 = undefined;
-    const reader = process.stdout.?.reader();
-    while (try reader.readUntilDelimiterOrEof(&msg_buf, '\n')) |msg| {
+    var reader = process.stdout.?.reader(&msg_buf);
+    while (reader.interface.takeDelimiterExclusive('\n')) |msg| {
         const trimmed = std.mem.trimRight(u8, msg, "\n");
 
         state.mutex.lock();
@@ -65,18 +72,21 @@ pub fn listenToProcess(comptime listener: Listener, state: *State, allocator: st
             .Metadata => state.metadata = trimmed,
             .Status => state.playing = std.mem.eql(u8, "Playing", msg),
         }
-        try std.json.stringify(state, .{}, state.writer);
+        try std.json.fmt(state, .{}).format(state.writer);
         try state.writer.writeByte('\n');
+        try state.writer.flush();
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        error.StreamTooLong => std.debug.print("line is too long for buffer: {}\n", .{err}),
+        else => std.debug.print("unexpected error: {}\n", .{err}),
     }
-
-    _ = process.kill() catch |err| {
-        std.debug.print("failed to kill {s}: {}\n", .{ process.argv, err });
-        return;
-    };
 }
 
 pub fn main() !void {
-    var state = State{ .playing = undefined, .metadata = "", .writer = std.io.getStdOut().writer().any(), .mutex = std.Thread.Mutex{} };
+    const stdout = std.fs.File.stdout();
+    var stdout_buffer: [1024]u8 = undefined;
+    var writer = stdout.writer(&stdout_buffer);
+    var state = State{ .playing = false, .metadata = "", .writer = &writer.interface, .mutex = std.Thread.Mutex{} };
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
